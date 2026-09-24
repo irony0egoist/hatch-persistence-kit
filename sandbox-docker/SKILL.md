@@ -28,13 +28,17 @@ Flow: `docker pull/create/export` → build OCI bundle → `crun` runs it via th
 ```bash
 ~/workspace/docker-fix/docker-run.sh -d <image> [command...]  # 后台运行
 ~/workspace/docker-fix/docker-run.sh ps                       # 列出容器
+~/workspace/docker-fix/docker-run.sh sh <name> [cmd...]       # 进容器开 shell (chroot 近似实现, crun exec 在此沙箱不可用)
 ~/workspace/docker-fix/docker-run.sh stop <name>...            # 优雅停止 (SIGTERM→10s→SIGKILL)
 ~/workspace/docker-fix/docker-run.sh kill <name>...            # 立即 SIGKILL
 ~/workspace/docker-fix/docker-run.sh logs <name>              # 看 -d 容器的日志
 ```
-Notes: `crun exec` doesn't work in this sandbox (seccomp blocks `setns`), so it
-is deliberately not wrapped — use foreground mode for debugging. The sandbox may
-reclaim a container's cgroup when the session ends while its processes survive as
+Notes: `crun exec` doesn't work in this sandbox (seccomp blocks `setns`); the
+`sh` subcommand is a chroot-based approximation (shell runs in the host's
+pid/mnt namespaces, only the filesystem root is the container's) — good enough
+for inspection and debugging. For a fully interactive environment, run the
+container in the foreground instead.
+The sandbox may reclaim a container's cgroup when the session ends while its processes survive as
 orphans (`ps` shows `stopped` but processes live on); `stop`/`kill` detect and
 clean these up (matched by mount namespace, safe against pid reuse). Compose
 services get stable names `<project>-<svc>` via `CR_CONTAINER_ID`.
