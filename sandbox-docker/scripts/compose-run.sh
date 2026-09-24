@@ -15,6 +15,7 @@
 set -e
 STATE_DIR="/tmp/compose-run-state"
 mkdir -p "$STATE_DIR"
+DOCKER_RUN_SH="$(cd "$(dirname "$0")" && pwd)/docker-run.sh"
 
 COMPOSE_FILE="compose.yaml"
 [[ -f "docker-compose.yaml" ]] && COMPOSE_FILE="docker-compose.yaml"
@@ -47,10 +48,14 @@ STATE_FILE="$STATE_DIR/$PROJECT.json"
 # ---------- down / ps / logs ----------
 if [[ "$CMD" == "down" ]]; then
     if [[ -f "$STATE_FILE" ]]; then
-        python3 - "$STATE_FILE" <<'PYEOF'
-import json, sys, os, signal
+        python3 - "$STATE_FILE" "$DOCKER_RUN_SH" "$PROJECT" <<'PYEOF'
+import json, sys, os, re, signal, subprocess
+script, project = sys.argv[2], sys.argv[3]
 with open(sys.argv[1]) as f: st = json.load(f)
 for name, info in st.get("services", {}).items():
+    # 先走 docker-run.sh stop: 优雅停止 + 孤儿进程/残留状态/bundle 清理
+    cname = re.sub(r'[^a-zA-Z0-9_.-]', '-', f"{project}-{name}")
+    subprocess.run([script, "stop", cname], capture_output=True)
     pid = info.get("pid")
     if pid:
         try:
@@ -110,7 +115,7 @@ fi
 # 按 depends_on 拓扑排序，逐个启动
 export COMPOSE_FILE
 python3 - "$CONFIG_JSON" "${SERVICES[*]}" "$STATE_DIR" "$PROJECT" <<'PYEOF'
-import json, sys, os, subprocess, time, signal
+import json, sys, os, re, subprocess, time, signal
 
 config = json.loads(sys.argv[1])
 wanted = sys.argv[2].split() if sys.argv[2].strip() else []
@@ -156,6 +161,8 @@ SCRIPT = "/home/hatch/workspace/docker-fix/docker-run.sh"
 
 for svc in order:
     cfg = services[svc]
+    # 容器用稳定名, 便于 docker-run.sh ps/stop/logs 管理 (down 时按名停止)
+    cname = re.sub(r'[^a-zA-Z0-9_.-]', '-', f"{project}-{svc}")
     image = cfg.get("image")
     if not image:
         # build 场景：尝试 docker compose build
@@ -259,6 +266,7 @@ for svc in order:
         if entrypoint:
             f.write(f"export CR_ENTRYPOINT={_shlex.quote(json.dumps(entrypoint))}\n")
         f.write(f"export COMPOSE_FILE={_shlex.quote(os.environ.get('COMPOSE_FILE', ''))}\n")
+        f.write(f"export CR_CONTAINER_ID={_shlex.quote(cname)}\n")
         parts = [_shlex.quote(SCRIPT), _shlex.quote(image)]
         if cmd:
             parts += [_shlex.quote(x) for x in cmd]
@@ -275,6 +283,8 @@ for svc in order:
             continue
         except OSError:
             pass
+    # wrapper 已死但容器可能残留 (stopped 状态/孤儿进程/旧 bundle), 先清掉再起新的
+    subprocess.run([SCRIPT, "stop", cname], capture_output=True)
     with open(logf, "ab") as lf:
         p = subprocess.Popen(["/bin/bash", helper], stdout=lf, stderr=subprocess.STDOUT,
                              start_new_session=True)
