@@ -24,6 +24,21 @@ Flow: `docker pull/create/export` → build OCI bundle → `crun` runs it via th
 `-v name:/dst` creates the named volume via dockerd if missing and bind-mounts
 `<data-root>/volumes/<name>/_data`; `-v /host/path:/dst` bind-mounts directly.
 
+**Manage containers** (crun wrapped, no need to call `crun` directly):
+```bash
+~/workspace/docker-fix/docker-run.sh -d <image> [command...]  # 后台运行
+~/workspace/docker-fix/docker-run.sh ps                       # 列出容器
+~/workspace/docker-fix/docker-run.sh stop <name>...            # 优雅停止 (SIGTERM→10s→SIGKILL)
+~/workspace/docker-fix/docker-run.sh kill <name>...            # 立即 SIGKILL
+~/workspace/docker-fix/docker-run.sh logs <name>              # 看 -d 容器的日志
+```
+Notes: `crun exec` doesn't work in this sandbox (seccomp blocks `setns`), so it
+is deliberately not wrapped — use foreground mode for debugging. The sandbox may
+reclaim a container's cgroup when the session ends while its processes survive as
+orphans (`ps` shows `stopped` but processes live on); `stop`/`kill` detect and
+clean these up (matched by mount namespace, safe against pid reuse). Compose
+services get stable names `<project>-<svc>` via `CR_CONTAINER_ID`.
+
 **Compose projects:**
 ```bash
 ~/workspace/docker-fix/compose-run.sh up [-f compose.yaml] [service...]
