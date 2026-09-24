@@ -7,6 +7,7 @@
 #   -v /host:/dst     bind mount（host 路径建议放在 ~ 下以跨越重置）
 # 管理命令 (crun 封装):
 #   docker-run.sh ps                  列出运行中的容器
+#   docker-run.sh sh <name> [cmd...]  进容器开 shell (chroot 近似实现)
 #   docker-run.sh stop <name>...      优雅停止 (SIGTERM, 10 秒后未退出则 SIGKILL)
 #   docker-run.sh kill <name>...      立即杀掉 (SIGKILL)
 #   docker-run.sh logs <name>         查看 -d 模式容器的日志
@@ -28,6 +29,7 @@ print_help() {
   cat <<'EOF'
 Usage:  docker-run.sh [OPTIONS] IMAGE [COMMAND] [ARG...]
    or:  docker-run.sh ps
+   or:  docker-run.sh sh CONTAINER [COMMAND...]
    or:  docker-run.sh stop CONTAINER [CONTAINER...]
    or:  docker-run.sh kill CONTAINER [CONTAINER...]
    or:  docker-run.sh logs CONTAINER
@@ -43,12 +45,14 @@ Options:
 
 Management commands (crun 封装, 无需直接调用 crun):
   ps                 列出容器
+  sh CONTAINER …     进容器开 shell (chroot 近似实现, 非真正 exec; 无参数则进交互式 /bin/sh)
   stop CONTAINER …   优雅停止: 先 SIGTERM, 10 秒未退出则 SIGKILL
   kill CONTAINER …   立即停止: SIGKILL
   logs CONTAINER     查看 -d 模式容器的日志 (最后 100 行)
 
 说明:
-  * crun exec 在本沙箱不可用 (seccomp 禁止 setns), 故不封装; 排查请用前台模式运行
+  * crun exec 在本沙箱不可用 (seccomp 禁止 setns); 要进容器用 sh 子命令,
+    要完整交互环境请用前台模式运行
   * 容器共享宿主 netns (无网络隔离), 无 cgroup 资源限制
   * 沙箱可能在会话结束时回收容器 cgroup 导致孤儿进程, stop/kill 会自动清理
 EOF
@@ -155,6 +159,29 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  sh)
+    # 近似 docker exec -it: crun exec 在本沙箱不可用 (seccomp 禁 setns),
+    # 这里用 chroot 进容器文件系统开 shell。注意 shell 运行在宿主的
+    # pid/mnt 命名空间里 (只换了 root), 网络本就共享故无差别; 日常排查够用。
+    shift
+    [[ $# -eq 0 ]] && { echo "用法: $0 sh <容器名> [命令...]" >&2; exit 1; }
+    _n="$1"; shift
+    _st="$($CRUN_BIN state "$_n" 2>/dev/null)" || { echo "$_n 不存在" >&2; exit 1; }
+    _pid="$(echo "$_st" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('pid') or '')" 2>/dev/null)"
+    _status="$(echo "$_st" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status') or '')" 2>/dev/null)"
+    _mnt=""
+    if [[ -n "${_pid:-}" && -d "/proc/$_pid" ]]; then
+      _mnt="$(readlink "/proc/$_pid/ns/mnt" 2>/dev/null)"
+    fi
+    _self_mnt="$(readlink /proc/self/ns/mnt 2>/dev/null)"
+    if [[ -z "$_mnt" || "$_mnt" == "$_self_mnt" ]]; then
+      echo "错误: $_n 的主进程已不存在${_status:+ (状态: $_status)}" >&2
+      exit 1
+    fi
+    [[ "$_status" != "running" ]] && echo "注意: $_n 状态为 $_status (cgroup 已被回收的孤儿), 仍可进入其文件系统" >&2
+    [[ $# -eq 0 ]] && set -- /bin/sh
+    exec chroot "/proc/$_pid/root" "$@"
+    ;;
 esac
 
 # --- 解析 -v / --volume / -d 参数 ---
@@ -200,7 +227,7 @@ shift || true
 
 if [[ -z "$IMAGE" ]]; then
     echo "用法: $0 [-d] [-v <src>:<dst> ...] <image> [command...]" >&2
-    echo "       $0 {ps|stop|kill|logs} ..." >&2
+    echo "       $0 {ps|sh|stop|kill|logs} ..." >&2
     echo "试试 '$0 --help' 查看完整帮助" >&2
     exit 1
 fi
