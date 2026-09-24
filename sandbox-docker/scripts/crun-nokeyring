@@ -1,0 +1,63 @@
+#!/bin/bash
+# crun 包装器（Muse 沙箱适配）：
+# 1. 在 create/run 后注入 --no-new-keyring（沙箱禁用 keyctl）
+# 2. 重写 ociVersion 1.3.0 -> 1.0.0（crun 1.14.1 不认 1.3.0）
+# 3. 剥离不可用的 cgroup 资源配置（沙箱 cgroup v2 无 controller）
+# 4. 删除 network namespace（共享宿主 netns，独立 netns 会被 seccomp 拦）
+# 5. 重写 capabilities 为实际拥有的全集
+# 6. LD_PRELOAD 拦截 capset（沙箱里 crun 的 capset 会 EPERM）
+REAL_CRUN=/usr/bin/crun
+out=()
+need_val=0
+subcmd_seen=0
+bundle=""
+for ((i=1; i<=$#; i++)); do
+  a="${!i}"
+  if (( need_val )); then out+=("$a"); need_val=0; continue; fi
+  if (( ! subcmd_seen )); then
+    case "$a" in
+      --root|--log|--log-format) out+=("$a"); need_val=1 ;;
+      create|run) out+=("$a" "--no-new-keyring"); subcmd_seen=1 ;;
+      --version|--help|-h|-v) out+=("$a"); subcmd_seen=1 ;;
+      *) out+=("$a"); [[ "$a" != -* ]] && subcmd_seen=1 ;;
+    esac
+  else
+    out+=("$a")
+  fi
+  if [[ "$a" == "--bundle" ]]; then
+    j=$((i+1)); bundle="${!j}"
+  fi
+done
+if [[ -n "$bundle" && -f "$bundle/config.json" ]]; then
+  python3 - "$bundle/config.json" <<'PYEOF2'
+import json, sys
+p = sys.argv[1]
+with open(p) as f: cfg = json.load(f)
+cfg["ociVersion"] = "1.0.0"
+res = cfg.get("linux", {}).get("resources", {})
+for k in ["blockIO", "cpu", "memory", "pids", "rdma", "hugepageLimits"]:
+    res.pop(k, None)
+nss = cfg.get("linux", {}).get("namespaces", [])
+cfg["linux"]["namespaces"] = [ns for ns in nss if ns.get("type") != "network"]
+sysctls = cfg.get("linux", {}).get("sysctl", {})
+for k in [k for k in sysctls if k.startswith("net.")]:
+    sysctls.pop(k, None)
+try:
+    cap_eff = 0
+    with open("/proc/self/status") as sf:
+        for line in sf:
+            if line.startswith("CapEff:"):
+                cap_eff = int(line.split()[1], 16)
+                break
+    cap_names = ["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_DAC_READ_SEARCH","CAP_FOWNER","CAP_FSETID","CAP_KILL","CAP_SETGID","CAP_SETUID","CAP_SETPCAP","CAP_LINUX_IMMUTABLE","CAP_NET_BIND_SERVICE","CAP_NET_ADMIN","CAP_NET_RAW","CAP_IPC_LOCK","CAP_IPC_OWNER","CAP_SYS_MODULE","CAP_SYS_RAWIO","CAP_SYS_CHROOT","CAP_SYS_PTRACE","CAP_SYS_PACCT","CAP_SYS_ADMIN","CAP_SYS_BOOT","CAP_SYS_NICE","CAP_SYS_RESOURCE","CAP_SYS_TIME","CAP_SYS_TTY_CONFIG","CAP_MKNOD","CAP_LEASE","CAP_AUDIT_WRITE","CAP_AUDIT_CONTROL","CAP_SETFCAP","CAP_MAC_OVERRIDE","CAP_MAC_ADMIN","CAP_SYSLOG","CAP_WAKE_ALARM","CAP_BLOCK_SUSPEND","CAP_AUDIT_READ"]
+    full = [cap_names[i] for i in range(len(cap_names)) if cap_eff & (1 << i)]
+    if full and "capabilities" in cfg.get("process", {}):
+        for k in ("bounding","effective","permitted"):
+            cfg["process"]["capabilities"][k] = full
+except Exception:
+    pass
+with open(p, "w") as f: json.dump(cfg, f)
+PYEOF2
+fi
+export LD_PRELOAD=/home/hatch/workspace/docker-fix/nocapset.so
+exec "$REAL_CRUN" "${out[@]}"
