@@ -1,3 +1,11 @@
+> 🎁 **Muse 邀请码 / Invite code: `G5U1BM`**
+
+快来看看你的个人 AI 智能体 Muse —— 加入后 48 小时内在「设置」里兑现邀请码，我们**分别获得 10 亿 Muse 词元**（可累积，每邀请 1 人双方各得 10 亿，最多 20 人）。
+
+https://muse.ai/join
+
+---
+
 # hatch-persistence-kit
 
 Skills and patterns for making programs and data survive platform VM resets —
