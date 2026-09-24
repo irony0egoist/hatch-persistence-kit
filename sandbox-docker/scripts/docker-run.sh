@@ -1,6 +1,7 @@
 #!/bin/bash
 # docker-run.sh: 在受限沙箱中用 crun 直接运行 Docker 镜像
 # 用法: docker-run.sh [-d] [-v|--volume <src>:<dst> ...] <image> [command...]
+#       docker-run.sh -h | --help     查看完整帮助 (风格参考 docker 官方 --help)
 #   -d, --detach  后台运行 (日志写入 <脚本目录>/logs/<容器名>.log, -d 须放在镜像名之前)
 #   -v name:/dst      命名卷（dockerd 管理，数据在 <data-root>/volumes/<name>，跨越平台重置）
 #   -v /host:/dst     bind mount（host 路径建议放在 ~ 下以跨越重置）
@@ -22,6 +23,36 @@ LOG_DIR="$SCRIPT_DIR/logs"
 
 # --- 子命令: 管理已运行容器 (crun 封装) ---
 # 注意: 子命令优先于同名镜像。如需运行名为 ps 的镜像, 请显式加 tag, 如: docker-run.sh ps:latest
+print_help() {
+  # 风格参考 docker 官方 --help: Usage + Options + Commands 分组
+  cat <<'EOF'
+Usage:  docker-run.sh [OPTIONS] IMAGE [COMMAND] [ARG...]
+   or:  docker-run.sh ps
+   or:  docker-run.sh stop CONTAINER [CONTAINER...]
+   or:  docker-run.sh kill CONTAINER [CONTAINER...]
+   or:  docker-run.sh logs CONTAINER
+
+在受限沙箱中用 crun 直接运行 Docker 镜像 (替代沙箱中不可用的 docker run)。
+
+Options:
+  -d, --detach       后台运行容器并打印容器名 (日志: <脚本目录>/logs/<容器名>.log,
+                     -d 须放在镜像名之前)
+  -v, --volume list  挂载卷, 可多次指定。命名卷 (dockerd 管理, 跨越平台重置)
+                     或主机路径 (建议放在 ~ 下以跨越重置)
+  -h, --help         打印本帮助
+
+Management commands (crun 封装, 无需直接调用 crun):
+  ps                 列出容器
+  stop CONTAINER …   优雅停止: 先 SIGTERM, 10 秒未退出则 SIGKILL
+  kill CONTAINER …   立即停止: SIGKILL
+  logs CONTAINER     查看 -d 模式容器的日志 (最后 100 行)
+
+说明:
+  * crun exec 在本沙箱不可用 (seccomp 禁止 setns), 故不封装; 排查请用前台模式运行
+  * 容器共享宿主 netns (无网络隔离), 无 cgroup 资源限制
+  * 沙箱可能在会话结束时回收容器 cgroup 导致孤儿进程, stop/kill 会自动清理
+EOF
+}
 _crun_name_exists() {
   # $1 = 容器名: 是否在 crun list 中 (任意状态)
   $CRUN_BIN list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"
@@ -158,7 +189,8 @@ v=json.load(sys.stdin); v.append([sys.argv[1], sys.argv[2]]); print(json.dumps(v
       ;;
     --) shift; break ;;
     -d|--detach) DETACH=1; shift ;;
-    -*) echo "未知选项: $1" >&2; exit 1 ;;
+    -h|--help) print_help; exit 0 ;;
+    -*) echo "未知选项: $1 (试试 '$0 --help')" >&2; exit 1 ;;
     *) break ;;
   esac
 done
@@ -169,6 +201,7 @@ shift || true
 if [[ -z "$IMAGE" ]]; then
     echo "用法: $0 [-d] [-v <src>:<dst> ...] <image> [command...]" >&2
     echo "       $0 {ps|stop|kill|logs} ..." >&2
+    echo "试试 '$0 --help' 查看完整帮助" >&2
     exit 1
 fi
 
