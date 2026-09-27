@@ -2,8 +2,12 @@
 #
 # hatch-persistence-kit 一键安装脚本
 #
-# 用法（复制这一行执行即可）：
-#   curl -fsSL https://raw.githubusercontent.com/irony0egoist/hatch-persistence-kit/main/install.sh | bash
+# 用法（复制这一行执行即可，无需 clone、无交互，agent 可无人值守运行）：
+#   curl -fsSL https://raw.githubusercontent.com/irony0egoist/hatch-persistence-kit/main/install.sh | bash -s -- --yes
+#
+# 参数：
+#   -y, --yes    显式声明无人值守（脚本本身无任何交互，此 flag 供 agent 调用方标记）
+#   -h, --help   显示帮助并退出
 #
 # 做了什么：
 #   1. 下载仓库（有 git 就 git clone，否则下载 tarball）
@@ -32,6 +36,25 @@ fail() { printf '[hpk-install] ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || fail "缺少命令: $1，请先安装它"
 }
+
+# ---- 0. 参数解析 ----
+YES=0
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) YES=1 ;;
+        -h|--help)
+            printf 'hatch-persistence-kit 一键安装\n\n'
+            printf '用法:\n'
+            printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash -s -- [--yes]\n\n' "$REPO"
+            printf '参数:\n'
+            printf '  -y, --yes   显式声明无人值守（脚本本身无任何交互）\n'
+            printf '  -h, --help  显示此帮助并退出\n'
+            exit 0
+            ;;
+        *) fail "未知参数: $arg（用 --help 查看用法）" ;;
+    esac
+done
+if [ "$YES" = 1 ]; then log "无人值守模式 (--yes)"; fi
 
 # ---- 1. 下载仓库 ----
 TMPDIR="$(mktemp -d)"
