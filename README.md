@@ -1,10 +1,10 @@
-> 🚀 **一键安装 / One-line install**
+> ⚡ **Fastest path — 一条命令，无需 clone，无交互 / One command, no clone, no prompts**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/irony0egoist/hatch-persistence-kit/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/irony0egoist/hatch-persistence-kit/main/install.sh | bash -s -- --yes
 ```
 
-一条命令装好 `platform-persistence` 与 `sandbox-docker` 两个 skills（含下载、自检），装完即用。
+一条命令装好 `platform-persistence` 与 `sandbox-docker` 两个 skills（含下载、自检），装完即用；agent 可直接无人值守运行。
 
 ---
 
