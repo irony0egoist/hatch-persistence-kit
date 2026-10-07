@@ -1,0 +1,13 @@
+[Unit]
+Description=小迪唤醒守护进程
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+ExecStart=/home/pi/stt/venv/bin/python /home/pi/stt/wake_daemon.py
+Restart=always
+RestartSec=10
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=default.target
